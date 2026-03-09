@@ -104,8 +104,9 @@ async def test_perform_llm_request_retry_on_whitelist():
     client_post_path = "rock.sdk.model.server.api.proxy.http_client.post"
 
     # Patch asyncio.sleep inside the retry module to avoid actual waiting
-    with patch(client_post_path, new_callable=AsyncMock) as mock_post, patch(
-        "rock.utils.retry.asyncio.sleep", return_value=None
+    with (
+        patch(client_post_path, new_callable=AsyncMock) as mock_post,
+        patch("rock.utils.retry.asyncio.sleep", return_value=None),
     ):
         # 1. Setup Failed Response (429)
         resp_429 = MagicMock(spec=Response)
@@ -157,8 +158,9 @@ async def test_perform_llm_request_network_timeout_retry():
     """
     client_post_path = "rock.sdk.model.server.api.proxy.http_client.post"
 
-    with patch(client_post_path, new_callable=AsyncMock) as mock_post, patch(
-        "rock.utils.retry.asyncio.sleep", return_value=None
+    with (
+        patch(client_post_path, new_callable=AsyncMock) as mock_post,
+        patch("rock.utils.retry.asyncio.sleep", return_value=None),
     ):
         resp_200 = MagicMock(spec=Response)
         resp_200.status_code = 200
@@ -309,8 +311,9 @@ async def test_perform_llm_request_respects_custom_retryable_codes():
 
     client_post_path = "rock.sdk.model.server.api.proxy.http_client.post"
 
-    with patch(client_post_path, new_callable=AsyncMock) as mock_post, patch(
-        "rock.utils.retry.asyncio.sleep", return_value=None
+    with (
+        patch(client_post_path, new_callable=AsyncMock) as mock_post,
+        patch("rock.utils.retry.asyncio.sleep", return_value=None),
     ):
         # 502 should retry (in custom list)
         resp_502 = MagicMock(spec=Response)

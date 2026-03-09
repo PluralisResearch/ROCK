@@ -1,6 +1,8 @@
 """LLM Service - FastAPI server for sandbox communication."""
+
 import argparse
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -10,7 +12,10 @@ from fastapi.responses import JSONResponse
 from rock.logger import init_logger
 from rock.sdk.model.server.api.local import init_local_api, local_router
 from rock.sdk.model.server.api.proxy import proxy_router
-from rock.sdk.model.server.config import ModelServiceConfig
+from rock.sdk.model.server.api.traces import traces_router
+from rock.sdk.model.server.config import LOG_DIR, ModelServiceConfig
+from rock.sdk.model.server.trace_store import init_store
+from rock.sdk.model.server.utils import init_traj_file
 
 # Configure logging
 logger = init_logger(__name__)
@@ -21,6 +26,19 @@ async def lifespan(app: FastAPI, config: ModelServiceConfig):
     """Application lifespan context manager."""
     logger.info("LLM Service started")
     app.state.model_service_config = config
+
+    # Initialize traj file override
+    if config.trace_file_path:
+        init_traj_file(config.trace_file_path)
+        logger.info(f"Traj file path set to: {config.trace_file_path}")
+
+    # Initialize trace store
+    if config.trace_db_enabled:
+        db_path = config.trace_db_path or os.path.join(LOG_DIR, "traces.db")
+        store = init_store(db_path)
+        app.state.trace_store = store
+        logger.info(f"Trace store initialized at: {db_path}")
+
     yield
     logger.info("LLM Service shutting down")
 
@@ -63,6 +81,9 @@ def main(
         app.include_router(local_router, prefix="", tags=["local"])
     else:
         app.include_router(proxy_router, prefix="", tags=["proxy"])
+
+    if config.trace_db_enabled:
+        app.include_router(traces_router, prefix="", tags=["traces"])
 
     logger.info(f"Starting LLM Service on {config.host}:{config.port}, type: {model_servie_type}")
     uvicorn.run(app, host=config.host, port=config.port, log_level="info", reload=False)

@@ -1,0 +1,20 @@
+# ROCK Model Gateway Configuration
+# Single-model proxy to a self-hosted vLLM endpoint
+
+# Server settings
+host: "0.0.0.0"
+port: 8080
+
+# Direct proxy — all requests forwarded to the vLLM endpoint
+proxy_base_url: "http://localhost:8000/v1"
+
+# Retry on transient errors
+retryable_status_codes: [429, 500, 502, 503]
+
+# Request timeout (seconds)
+request_timeout: 120
+
+# Trace settings
+trace_db_enabled: true
+# trace_db_path: ""       # Default: <LOG_DIR>/traces.db
+# trace_file_path: ""     # Default: <LOG_DIR>/LLMTraj.jsonl

@@ -1,118 +1,60 @@
-# Plan: Central Model Gateway for Coding Agents with Open Models
+# Plan: Central Model Gateway for Coding Agents (Single Hosted Model)
 
 ## Goal
 
 Engineers use a coding agent CLI (iflow/similar) locally on their real repos.
-Open models (GLM-5, MiniMax, etc.) are hosted via vLLM on a GPU server.
-All LLM calls are traced centrally with rich metadata (who, when, what model, success/fail).
+A single hosted model is used via vLLM:
+`Qwen/Qwen3.5-35B-A3B`.
+All LLM calls are traced centrally with metadata (who, when, model, success/fail).
+ROCK gateway is started/stopped with `~/pluralis-local-agent/ROCK/.venv/bin/python`.
 
 ## Architecture
 
 ```
-Engineer's laptop                    GPU Server
+Engineer's laptop                    Gateway Host
 ┌────────────────┐                  ┌──────────────────────────────────┐
-│ iflow CLI      │                  │                                  │
-│ (works on real │── /v1/chat/──>   │  ROCK Model Gateway (:8080)      │
-│  local files)  │   completions    │  (trace logging + routing)       │
-└────────────────┘                  │       │               │          │
-                                    │  ┌────▼─────┐  ┌─────▼───────┐  │
-                                    │  │ vLLM     │  │ vLLM        │  │
-                                    │  │ GLM-5    │  │ MiniMax     │  │
-                                    │  │ :8001    │  │ :8002       │  │
-                                    │  └──────────┘  └─────────────┘  │
+│ iflow CLI      │                  │ ROCK Model Gateway (:8080)       │
+│ (works on real │── /v1/chat/──>   │ (trace logging + routing)        │
+│ local files)   │   completions    │        │                         │
+└────────────────┘                  │        ▼                         │
+                                    │  Hosted vLLM endpoint            │
+                                    │  Qwen/Qwen3.5-35B-A3B            │
                                     └──────────────────────────────────┘
 ```
 
 ---
 
-## Phase 1: vLLM Model Hosting
+## Phase 1: Use Existing Hosted vLLM Endpoint
 
-> Nothing to code — just deployment configs.
+> No GPU/toolkit deployment work in this plan. Model hosting already exists.
 
-### What to download / install on GPU server
-
-| Item | Command | Notes |
-|------|---------|-------|
-| Docker + NVIDIA Container Toolkit | [nvidia docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) | Required for GPU passthrough |
-| vLLM Docker image | `docker pull vllm/vllm-openai:latest` | ~8GB, includes CUDA runtime |
-| Model weights (auto-downloaded) | Pulled by vLLM on first start via HuggingFace | Set `HF_TOKEN` env var if gated model |
-
-### What to create
-
-**File: `examples/agents/open_model_gateway/vllm/docker-compose.yaml`**
-
-```yaml
-services:
-  vllm-glm5:
-    image: vllm/vllm-openai:latest
-    command: >
-      --model THUDM/glm-4-9b-chat
-      --tensor-parallel-size 1
-      --max-model-len 32768
-      --trust-remote-code
-    ports:
-      - "8001:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
-              count: 1
-    volumes:
-      - huggingface-cache:/root/.cache/huggingface
-    environment:
-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
-    restart: unless-stopped
-
-  vllm-minimax:
-    image: vllm/vllm-openai:latest
-    command: >
-      --model MiniMaxAI/MiniMax-M1-80k
-      --tensor-parallel-size 2
-      --max-model-len 65536
-      --trust-remote-code
-    ports:
-      - "8002:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
-              count: 2
-    volumes:
-      - huggingface-cache:/root/.cache/huggingface
-    environment:
-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
-    restart: unless-stopped
-
-volumes:
-  huggingface-cache:
-```
-
-**File: `examples/agents/open_model_gateway/vllm/vllm_models.yaml`**
-
-Reference table of models, HuggingFace IDs, GPU requirements, and recommended vLLM args.
-
-### How to run
+Validate current model server:
 
 ```bash
-cd examples/agents/open_model_gateway/vllm
-HF_TOKEN=hf_xxx docker compose up -d
-
-# Verify
-curl http://localhost:8001/v1/models  # should list glm-4-9b-chat
-curl http://localhost:8002/v1/models  # should list MiniMax-M1-80k
+curl http://localhost:8000/v1/models
+# Should include Qwen/Qwen3.5-35B-A3B
 ```
 
-### Depends on
+Gateway config should route only this model.
+ROCK gateway should be started/stopped via the ROCK venv Python.
 
-Nothing — can be done independently.
+```bash
+cd ~/pluralis-local-agent/ROCK/examples/agents/open_model_gateway
+
+# Start
+~/pluralis-local-agent/ROCK/.venv/bin/python -m rock.sdk.model.server.main \
+  --type proxy \
+  --config-file gateway_config.yaml \
+  --host 0.0.0.0 \
+  --port 8080
+
+# Stop
+pkill -f "rock.sdk.model.server.main"
+```
 
 ---
 
 ## Phase 2: Enhance ROCK Gateway Trace Recording
-
-> The core code changes. Everything below is in existing ROCK source files.
 
 ### Step 2a: Update config — add trace settings
 
@@ -122,24 +64,15 @@ Add to `ModelServiceConfig`:
 
 ```python
 trace_db_enabled: bool = Field(default=True)
-"""Enable SQLite trace database for queryable trace storage."""
-
 trace_db_path: str = Field(default="./data/traces.db")
-"""Path to SQLite trace database file."""
-
 trace_file_path: str = Field(default="./data/LLMTraj.jsonl")
-"""Path to JSONL trace file. Replaces the module-level TRAJ_FILE constant."""
 ```
-
-Remove module-level `TRAJ_FILE` constant (move it into config).
 
 ### Step 2b: Enhance `@record_traj` with metadata
 
 **CHANGE file: `rock/sdk/model/server/utils.py`**
 
-Current state — only saves `{"request": body, "response": response_data}`.
-
-New state — the decorator must accept the FastAPI `Request` object and capture:
+Capture request/response plus metadata:
 
 ```python
 {
@@ -148,11 +81,11 @@ New state — the decorator must accept the FastAPI `Request` object and capture
     "user_id": request.headers.get("X-Rock-User-Id", "anonymous"),
     "session_id": request.headers.get("X-Rock-Session-Id", ""),
     "agent_type": request.headers.get("X-Rock-Agent-Type", ""),
-    "model": body.get("model", ""),
+    "model": body.get("model", "Qwen/Qwen3.5-35B-A3B"),
     "latency_ms": <end_time - start_time in ms>,
     "status": "success" | "error",
     "error": "<error message if failed, else null>",
-    "token_usage": {  # extracted from response
+    "token_usage": {
         "prompt_tokens": ...,
         "completion_tokens": ...,
         "total_tokens": ...
@@ -162,24 +95,11 @@ New state — the decorator must accept the FastAPI `Request` object and capture
 }
 ```
 
-Key changes:
-- Decorator wraps with `time.time()` before/after to measure latency
-- Reads `X-Rock-*` headers from the `Request` object
-- Extracts `usage` from response JSON
-- Generates a `trace_id` (uuid4) per call
-- Writes to JSONL (as before) AND optionally to SQLite (new)
-
-### Step 2c: Update proxy endpoint to pass Request to decorator
+### Step 2c: Update proxy endpoint for error-path trace recording
 
 **CHANGE file: `rock/sdk/model/server/api/proxy.py`**
 
-The `@record_traj` decorator already wraps `chat_completions(body, request)`. The change is that `record_traj` now needs to read `request` from the function kwargs. The function signature already has `request: Request` — just need the decorator to extract it.
-
-Also handle error cases: when the proxy catches `HTTPStatusError` or other exceptions, still record a trace with `status: "error"`.
-
-### Depends on
-
-- Phase 1 must be running (vLLM) to actually test end-to-end, but code changes can be written independently.
+Ensure traces are written for both success and error paths.
 
 ---
 
@@ -188,8 +108,6 @@ Also handle error cases: when the proxy catches `HTTPStatusError` or other excep
 ### Step 3a: Create trace store module
 
 **CREATE file: `rock/sdk/model/server/trace_store.py`**
-
-Simple SQLite-backed store. One table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS traces (
@@ -200,56 +118,29 @@ CREATE TABLE IF NOT EXISTS traces (
     agent_type   TEXT DEFAULT '',
     model        TEXT NOT NULL,
     latency_ms   REAL,
-    status       TEXT NOT NULL,  -- 'success' or 'error'
+    status       TEXT NOT NULL,
     error        TEXT,
     prompt_tokens     INTEGER,
     completion_tokens INTEGER,
     total_tokens      INTEGER,
-    request_body TEXT,  -- JSON string
-    response_body TEXT  -- JSON string
+    request_body TEXT,
+    response_body TEXT
 );
-
-CREATE INDEX IF NOT EXISTS idx_traces_user_id ON traces(user_id);
-CREATE INDEX IF NOT EXISTS idx_traces_model ON traces(model);
-CREATE INDEX IF NOT EXISTS idx_traces_timestamp ON traces(timestamp);
-CREATE INDEX IF NOT EXISTS idx_traces_status ON traces(status);
 ```
 
-Python class:
-
-```python
-class TraceStore:
-    def __init__(self, db_path: str): ...
-    def insert(self, trace: dict): ...
-    def query(self, user_id=None, model=None, status=None, start=None, end=None, limit=100, offset=0) -> list[dict]: ...
-    def get(self, trace_id: str) -> dict | None: ...
-    def stats(self, user_id=None, model=None) -> dict: ...
-        # returns: total_calls, error_rate, avg_latency_ms, per_model breakdown
-```
+Create indexes for `user_id`, `model`, `timestamp`, `status`.
 
 ### Step 3b: Wire trace store into `utils.py`
 
 **CHANGE file: `rock/sdk/model/server/utils.py`**
 
-In `_write_traj`, after writing JSONL, also call `trace_store.insert(data)` if `trace_db_enabled`.
-
-The `TraceStore` singleton is initialized in `main.py` during app startup and stored in `app.state`.
+After JSONL write, call `trace_store.insert(data)` when enabled.
 
 ### Step 3c: Initialize trace store in app startup
 
 **CHANGE file: `rock/sdk/model/server/main.py`**
 
-In the `lifespan` function, after setting `app.state.model_service_config`, add:
-
-```python
-if config.trace_db_enabled:
-    from rock.sdk.model.server.trace_store import TraceStore
-    app.state.trace_store = TraceStore(config.trace_db_path)
-```
-
-### Depends on
-
-Phase 2 (trace data format must be defined first).
+Initialize `TraceStore` in app lifespan and attach to `app.state`.
 
 ---
 
@@ -259,41 +150,17 @@ Phase 2 (trace data format must be defined first).
 
 **CREATE file: `rock/sdk/model/server/api/traces.py`**
 
-Three endpoints:
+Endpoints:
 
-```
-GET /v1/traces?user_id=&model=&status=&start=&end=&limit=50&offset=0
-    → Returns list of trace summaries (without full request/response bodies)
-
-GET /v1/traces/{trace_id}
-    → Returns full trace detail including request/response bodies
-
-GET /v1/traces/stats?user_id=&model=
-    → Returns aggregate stats:
-      {
-        "total_calls": 1234,
-        "error_count": 56,
-        "error_rate": 0.045,
-        "avg_latency_ms": 2340,
-        "by_model": {"glm-5": {"calls": 800, "errors": 30}, ...},
-        "by_user": {"alice": {"calls": 200, "errors": 5}, ...}
-      }
-```
+- `GET /v1/traces?user_id=&model=&status=&start=&end=&limit=50&offset=0`
+- `GET /v1/traces/{trace_id}`
+- `GET /v1/traces/stats?user_id=&model=`
 
 ### Step 4b: Register router in app
 
 **CHANGE file: `rock/sdk/model/server/main.py`**
 
-Add `traces_router` to the app (always, even if `trace_db_enabled=False` — return 404 in that case).
-
-```python
-from rock.sdk.model.server.api.traces import traces_router
-app.include_router(traces_router, prefix="", tags=["traces"])
-```
-
-### Depends on
-
-Phase 3 (needs TraceStore).
+Include traces router in FastAPI app setup.
 
 ---
 
@@ -307,9 +174,8 @@ Phase 3 (needs TraceStore).
 host: "0.0.0.0"
 port: 8080
 proxy_rules:
-  "glm-5":   "http://localhost:8001/v1"
-  "minimax":  "http://localhost:8002/v1"
-  "default":  "http://localhost:8001/v1"
+  "Qwen/Qwen3.5-35B-A3B": "http://localhost:8000/v1"
+  "default": "http://localhost:8000/v1"
 trace_db_enabled: true
 trace_db_path: "./data/traces.db"
 trace_file_path: "./data/LLMTraj.jsonl"
@@ -321,66 +187,41 @@ request_timeout: 120
 
 ```bash
 #!/bin/bash
-# One-time setup for engineers to use the coding agent with open models
-
 GATEWAY_URL="${1:-http://gateway.internal:8080/v1}"
 USER_ID="${2:-$(whoami)}"
 
-echo "Installing iflow CLI..."
 npm install -g @anthropic-ai/iflow-cli
 
-echo "Configuring environment..."
-cat >> ~/.bashrc << EOF
+cat >> ~/.bashrc << EOF2
 
 # ROCK Coding Agent Gateway
 export IFLOW_BASE_URL="${GATEWAY_URL}"
-export IFLOW_MODEL_NAME="glm-5"
+export IFLOW_MODEL_NAME="Qwen/Qwen3.5-35B-A3B"
 export IFLOW_API_KEY="${USER_ID}"
-EOF
+EOF2
 
 source ~/.bashrc
-echo "Done. Run: iflow \"your prompt here\""
 ```
 
 **File: `examples/agents/open_model_gateway/README.md`**
 
 Instructions covering:
-1. Server setup (vLLM + gateway)
-2. Engineer onboarding (run engineer_setup.sh)
-3. How to view traces
-
-### Depends on
-
-All previous phases.
+1. Gateway setup
+2. Engineer onboarding
+3. Trace inspection
 
 ---
 
 ## Phase 6: Tests
 
 **CREATE file: `tests/unit/sdk/model/test_trace_store.py`**
-
-- Test `TraceStore.insert()` and `TraceStore.query()` with filters
-- Test `TraceStore.get()` by trace_id
-- Test `TraceStore.stats()` aggregation
-- Use in-memory SQLite (`:memory:`)
+- Test insert/query/get/stats with in-memory SQLite.
 
 **CREATE file: `tests/unit/sdk/model/test_enhanced_traj.py`**
-
-- Test enhanced `@record_traj` captures all metadata fields
-- Test it handles missing headers gracefully (defaults to "anonymous")
-- Test error cases produce `status: "error"` traces
-- Test latency measurement is reasonable
+- Test metadata capture, defaults, and error-path traces.
 
 **CREATE file: `tests/unit/sdk/model/test_traces_api.py`**
-
-- Test `GET /v1/traces` with various filters
-- Test `GET /v1/traces/{trace_id}` returns full detail
-- Test `GET /v1/traces/stats` returns correct aggregates
-- Use FastAPI TestClient
-
-### Depends on
-
-Write tests alongside each phase (TDD).
+- Test traces list/detail/stats endpoints with filters.
 
 ---
 
@@ -390,47 +231,43 @@ Write tests alongside each phase (TDD).
 
 | File | What changes |
 |------|-------------|
-| `rock/sdk/model/server/config.py` | Add `trace_db_enabled`, `trace_db_path`, `trace_file_path` fields |
-| `rock/sdk/model/server/utils.py` | Enhance `@record_traj` with metadata, latency, headers, SQLite write |
-| `rock/sdk/model/server/api/proxy.py` | Record traces on error paths too, pass request context |
-| `rock/sdk/model/server/main.py` | Init TraceStore on startup, register traces router |
+| `rock/sdk/model/server/config.py` | Add `trace_db_enabled`, `trace_db_path`, `trace_file_path` |
+| `rock/sdk/model/server/utils.py` | Enhance `@record_traj` with metadata and SQLite write |
+| `rock/sdk/model/server/api/proxy.py` | Record traces on error paths too |
+| `rock/sdk/model/server/main.py` | Init TraceStore and register traces router |
 
 ### CREATED (new files)
 
 | File | Purpose |
 |------|---------|
 | `rock/sdk/model/server/trace_store.py` | SQLite trace storage + query |
-| `rock/sdk/model/server/api/traces.py` | REST API for trace queries |
-| `examples/agents/open_model_gateway/vllm/docker-compose.yaml` | vLLM deployment |
-| `examples/agents/open_model_gateway/vllm/vllm_models.yaml` | Model reference table |
-| `examples/agents/open_model_gateway/gateway_config.yaml` | Gateway config example |
+| `rock/sdk/model/server/api/traces.py` | Trace query API |
+| `examples/agents/open_model_gateway/gateway_config.yaml` | Single-model gateway config |
 | `examples/agents/open_model_gateway/engineer_setup.sh` | Engineer onboarding script |
-| `examples/agents/open_model_gateway/README.md` | Full setup instructions |
-| `tests/unit/sdk/model/test_trace_store.py` | TraceStore unit tests |
-| `tests/unit/sdk/model/test_enhanced_traj.py` | Enhanced traj decorator tests |
-| `tests/unit/sdk/model/test_traces_api.py` | Traces API endpoint tests |
+| `examples/agents/open_model_gateway/README.md` | Setup instructions |
+| `tests/unit/sdk/model/test_trace_store.py` | TraceStore tests |
+| `tests/unit/sdk/model/test_enhanced_traj.py` | Traj decorator tests |
+| `tests/unit/sdk/model/test_traces_api.py` | Traces API tests |
 
 ### DOWNLOADED (external dependencies)
 
 | Item | Where | How |
 |------|-------|-----|
-| vLLM Docker image | GPU server | `docker pull vllm/vllm-openai:latest` |
-| NVIDIA Container Toolkit | GPU server | System package install |
-| Model weights (GLM-5, MiniMax) | GPU server (auto-cached) | Auto-downloaded by vLLM from HuggingFace |
-| iflow CLI | Each engineer's laptop | `npm install -g @anthropic-ai/iflow-cli` |
+| iflow CLI | Engineer laptop | `npm install -g @anthropic-ai/iflow-cli` |
 
 ### NO new Python dependencies
 
-Everything uses stdlib (`sqlite3`, `uuid`, `time`, `json`) + already-installed packages (`FastAPI`, `pydantic`, `httpx`).
+Uses stdlib (`sqlite3`, `uuid`, `time`, `json`) + existing FastAPI/pydantic/httpx.
 
 ---
 
-## Implementation Order (what to do first → last)
+## Implementation Order
 
 ```
-Phase 1  →  Phase 2a → 2b → 2c  →  Phase 3a → 3b → 3c  →  Phase 4a → 4b  →  Phase 5
-(vLLM)      (config)  (traj)  (proxy)  (store)  (wire)  (init)  (API)    (register) (example)
- deploy      │←── can be done in parallel ──→│   │←── depends on 2 ──→│  │←─ dep 3 ─→│
+Phase 1 -> Phase 2 -> Phase 3 -> Phase 4 -> Phase 5
+(existing   (trace)    (store)    (API)      (onboarding)
+hosted
+model)
 ```
 
-Tests are written alongside each phase.
+Tests should be written alongside each phase.

@@ -51,6 +51,15 @@ class ModelServiceConfig(BaseModel):
     request_timeout: int = Field(default=120)
     """Request timeout in seconds."""
 
+    trace_db_enabled: bool = Field(default=True)
+    """Enable SQLite trace storage."""
+
+    trace_db_path: str = Field(default="")
+    """Path to SQLite trace database. Empty uses LOG_DIR/traces.db."""
+
+    trace_file_path: str = Field(default="")
+    """Path to JSONL trace file. Empty uses default TRAJ_FILE."""
+
     @classmethod
     def from_file(cls, config_path: str | None = None):
         """
