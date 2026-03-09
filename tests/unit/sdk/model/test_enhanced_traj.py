@@ -174,3 +174,63 @@ async def test_backward_compatibility_no_request():
         await handler(body)
         trace = mock_write.call_args[0][0]
         assert trace["user_id"] == "anonymous"
+
+
+@pytest.mark.asyncio
+async def test_user_id_from_authorization_bearer():
+    """Test that user_id is extracted from Authorization: Bearer header."""
+    body = {"model": "qwen", "messages": []}
+    request = MagicMock(spec=Request)
+    request.headers = {"authorization": "Bearer Gayal"}
+
+    @record_traj
+    async def handler(body, request):
+        return {"id": "chat-1", "choices": []}
+
+    with (
+        patch("rock.sdk.model.server.utils._write_traj") as mock_write,
+        patch("rock.sdk.model.server.utils._write_to_store"),
+    ):
+        await handler(body, request)
+        trace = mock_write.call_args[0][0]
+        assert trace["user_id"] == "Gayal"
+
+
+@pytest.mark.asyncio
+async def test_x_rock_user_id_takes_priority():
+    """Test that x-rock-user-id takes priority over Authorization header."""
+    body = {"model": "qwen", "messages": []}
+    request = MagicMock(spec=Request)
+    request.headers = {"x-rock-user-id": "custom-user", "authorization": "Bearer Gayal"}
+
+    @record_traj
+    async def handler(body, request):
+        return {"id": "chat-1", "choices": []}
+
+    with (
+        patch("rock.sdk.model.server.utils._write_traj") as mock_write,
+        patch("rock.sdk.model.server.utils._write_to_store"),
+    ):
+        await handler(body, request)
+        trace = mock_write.call_args[0][0]
+        assert trace["user_id"] == "custom-user"
+
+
+@pytest.mark.asyncio
+async def test_user_id_from_x_api_key():
+    """Test that user_id falls back to x-api-key header."""
+    body = {"model": "qwen", "messages": []}
+    request = MagicMock(spec=Request)
+    request.headers = {"x-api-key": "api-key-user"}
+
+    @record_traj
+    async def handler(body, request):
+        return {"id": "chat-1", "choices": []}
+
+    with (
+        patch("rock.sdk.model.server.utils._write_traj") as mock_write,
+        patch("rock.sdk.model.server.utils._write_to_store"),
+    ):
+        await handler(body, request)
+        trace = mock_write.call_args[0][0]
+        assert trace["user_id"] == "api-key-user"

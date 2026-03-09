@@ -60,7 +60,15 @@ def record_traj(func: Callable):
         session_id = ""
         agent_type = ""
         if request is not None:
-            user_id = request.headers.get("x-rock-user-id", "anonymous")
+            user_id = request.headers.get("x-rock-user-id", "")
+            if not user_id:
+                auth_header = request.headers.get("authorization", "")
+                if auth_header.lower().startswith("bearer "):
+                    user_id = auth_header[7:].strip()
+            if not user_id:
+                user_id = request.headers.get("x-api-key", "")
+            if not user_id:
+                user_id = "anonymous"
             session_id = request.headers.get("x-rock-session-id", "")
             agent_type = request.headers.get("x-rock-agent-type", "")
 

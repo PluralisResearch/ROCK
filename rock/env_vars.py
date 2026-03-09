@@ -99,7 +99,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
         "ROCK_CLI_DEFAULT_CONFIG_PATH", Path.home() / ".rock" / "config.ini"
     ),
     "ROCK_MODEL_SERVICE_DATA_DIR": lambda: os.getenv("ROCK_MODEL_SERVICE_DATA_DIR", "/data/logs"),
-    "ROCK_MODEL_SERVICE_TRAJ_APPEND_MODE": lambda: os.getenv("ROCK_MODEL_SERVICE_TRAJ_APPEND_MODE", "false").lower()
+    "ROCK_MODEL_SERVICE_TRAJ_APPEND_MODE": lambda: os.getenv("ROCK_MODEL_SERVICE_TRAJ_APPEND_MODE", "true").lower()
     == "true",
     "ROCK_RTENV_PYTHON_V31114_INSTALL_CMD": lambda: os.getenv(
         "ROCK_RTENV_PYTHON_V31114_INSTALL_CMD",
