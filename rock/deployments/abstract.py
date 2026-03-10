@@ -11,8 +11,7 @@ logger = init_logger(__name__)
 
 class AbstractDeployment(ABC):
     @abstractmethod
-    def add_hook(self, hook: DeploymentHook):
-        ...
+    def add_hook(self, hook: DeploymentHook): ...
 
     @abstractmethod
     async def is_alive(self, *, timeout: float | None = None) -> IsAliveResponse:

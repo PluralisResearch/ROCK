@@ -222,6 +222,7 @@ def get_iso8601_timestamp(timestamp: int = None, timezone: str = None):
         time = datetime.datetime.now(tz)
     return time.isoformat(timespec="seconds")
 
+
 def is_primary_pod() -> bool:
     """
     Check if the current pod is the primary pod (index 0).

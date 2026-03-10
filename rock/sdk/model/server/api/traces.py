@@ -59,6 +59,65 @@ def _get_store_or_503(request: Request):
     return store
 
 
+@traces_router.get("/v1/traces/users")
+async def get_user_stats(
+    request: Request,
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+):
+    """Get per-user aggregate statistics."""
+    store = _get_store_or_503(request)
+    stats = await asyncio.to_thread(store.get_user_stats, start=start, end=end)
+    return stats
+
+
+@traces_router.get("/v1/traces/sessions")
+async def get_session_stats(
+    request: Request,
+    user_id: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+):
+    """Get per-session aggregate statistics."""
+    store = _get_store_or_503(request)
+    stats = await asyncio.to_thread(
+        store.get_session_stats, user_id=user_id, start=start, end=end, limit=limit, offset=offset
+    )
+    return stats
+
+
+@traces_router.get("/v1/traces/timeline")
+async def get_timeline(
+    request: Request,
+    interval: str = Query(default="hour", pattern="^(hour|day)$"),
+    user_id: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+):
+    """Get time-bucketed trace aggregation."""
+    store = _get_store_or_503(request)
+    data = await asyncio.to_thread(store.get_timeline, interval=interval, user_id=user_id, start=start, end=end)
+    return data
+
+
+@traces_router.get("/v1/traces/conversation")
+async def get_conversation(
+    request: Request,
+    session_id: str | None = Query(default=None),
+    user_id: str | None = Query(default=None),
+    trace_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """Get conversation messages from traces. Filter by session_id, user_id, or trace_id."""
+    store = _get_store_or_503(request)
+    data = await asyncio.to_thread(
+        store.get_conversation, session_id=session_id, user_id=user_id, trace_id=trace_id, limit=limit
+    )
+    return data
+
+
 @traces_router.get("/v1/traces/stats", response_model=TraceStatsResponse)
 async def get_trace_stats(
     request: Request,

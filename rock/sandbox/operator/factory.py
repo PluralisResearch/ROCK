@@ -68,4 +68,4 @@ class OperatorFactory:
             logger.info("Creating K8sOperator")
             return K8sOperator(k8s_config=context.k8s_config)
         else:
-            raise ValueError(f"Unsupported operator type: {operator_type}. " f"Supported types: ray, kubernetes")
+            raise ValueError(f"Unsupported operator type: {operator_type}. Supported types: ray, kubernetes")

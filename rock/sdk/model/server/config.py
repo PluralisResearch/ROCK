@@ -60,6 +60,10 @@ class ModelServiceConfig(BaseModel):
     trace_file_path: str = Field(default="")
     """Path to JSONL trace file. Empty uses default TRAJ_FILE."""
 
+    session_timeout_minutes: int = Field(default=30)
+    """Session inference timeout in minutes. Requests from the same user with the same
+    first user message within this window are grouped into the same session."""
+
     @classmethod
     def from_file(cls, config_path: str | None = None):
         """

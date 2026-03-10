@@ -70,6 +70,16 @@ def record_traj(func: Callable):
             if not user_id:
                 user_id = "anonymous"
             session_id = request.headers.get("x-rock-session-id", "")
+            if not session_id:
+                try:
+                    from rock.sdk.model.server.session import get_session_manager
+
+                    mgr = get_session_manager()
+                    if mgr is not None and isinstance(body, dict):
+                        messages = body.get("messages", [])
+                        session_id = mgr.infer_session_id(user_id, messages)
+                except Exception:
+                    pass
             agent_type = request.headers.get("x-rock-agent-type", "")
 
         trace_id = str(uuid.uuid4())

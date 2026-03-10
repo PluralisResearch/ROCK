@@ -14,6 +14,7 @@ from rock.sdk.model.server.api.local import init_local_api, local_router
 from rock.sdk.model.server.api.proxy import proxy_router
 from rock.sdk.model.server.api.traces import traces_router
 from rock.sdk.model.server.config import LOG_DIR, ModelServiceConfig
+from rock.sdk.model.server.session import init_session_manager
 from rock.sdk.model.server.trace_store import init_store
 from rock.sdk.model.server.utils import init_traj_file
 
@@ -38,6 +39,10 @@ async def lifespan(app: FastAPI, config: ModelServiceConfig):
         store = init_store(db_path)
         app.state.trace_store = store
         logger.info(f"Trace store initialized at: {db_path}")
+
+    # Initialize session manager
+    init_session_manager(timeout_minutes=config.session_timeout_minutes)
+    logger.info(f"Session inference enabled (timeout={config.session_timeout_minutes}m)")
 
     yield
     logger.info("LLM Service shutting down")
@@ -84,6 +89,10 @@ def main(
 
     if config.trace_db_enabled:
         app.include_router(traces_router, prefix="", tags=["traces"])
+
+        from rock.sdk.model.server.dashboard import dashboard_router
+
+        app.include_router(dashboard_router, prefix="", tags=["dashboard"])
 
     logger.info(f"Starting LLM Service on {config.host}:{config.port}, type: {model_servie_type}")
     uvicorn.run(app, host=config.host, port=config.port, log_level="info", reload=False)

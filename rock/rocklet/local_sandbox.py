@@ -128,16 +128,13 @@ def _check_bash_command(command: str) -> None:
 
 class Session(ABC):
     @abstractmethod
-    async def start(self) -> CreateSessionResponse:
-        ...
+    async def start(self) -> CreateSessionResponse: ...
 
     @abstractmethod
-    async def run(self, action: Action) -> Observation:
-        ...
+    async def run(self, action: Action) -> Observation: ...
 
     @abstractmethod
-    async def close(self) -> CloseSessionResponse:
-        ...
+    async def close(self) -> CloseSessionResponse: ...
 
 
 class BashSession(Session):

@@ -13,16 +13,13 @@ class AbstractOperator(ABC):
     _runtime_config: RuntimeConfig | None = None
 
     @abstractmethod
-    async def submit(self, config: DeploymentConfig, user_info: dict = {}) -> SandboxInfo:
-        ...
+    async def submit(self, config: DeploymentConfig, user_info: dict = {}) -> SandboxInfo: ...
 
     @abstractmethod
-    async def get_status(self, sandbox_id: str) -> SandboxInfo:
-        ...
+    async def get_status(self, sandbox_id: str) -> SandboxInfo: ...
 
     @abstractmethod
-    async def stop(self, sandbox_id: str) -> bool:
-        ...
+    async def stop(self, sandbox_id: str) -> bool: ...
 
     def set_redis_provider(self, redis_provider: RedisProvider):
         self._redis_provider = redis_provider

@@ -1,6 +1,5 @@
 class DeploymentHook:
-    def on_custom_step(self, message: str):
-        ...
+    def on_custom_step(self, message: str): ...
 
 
 class CombinedDeploymentHook(DeploymentHook):

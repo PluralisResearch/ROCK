@@ -18,3 +18,6 @@ request_timeout: 120
 trace_db_enabled: true
 # trace_db_path: ""       # Default: <LOG_DIR>/traces.db
 # trace_file_path: ""     # Default: <LOG_DIR>/LLMTraj.jsonl
+
+# Session inference — groups related requests into sessions automatically
+session_timeout_minutes: 30
